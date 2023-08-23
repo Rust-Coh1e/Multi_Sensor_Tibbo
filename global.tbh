@@ -1,0 +1,85 @@
+const CR_LF=chr(13)+chr(10)
+
+
+'DEFINES-------------------------------------------------------------
+#define WLN_DEBUG_PRINT 1
+#define WLN_AVAILABLE 1
+#define WLN_WPA 1
+'For version of TIDE prior to 5.04.03, this value should be defined
+'#define LIB_VER_2_10 'Define the library version here LIB_VER_2_00/LIB_VER_2_01/LIB_VER_2_03/LIB_VER_2_04/LIB_VER_2_10 
+
+'DEFINES-------------------------------------------------------------
+
+#define MQTT_DEBUG_PRINT 1
+#define MQTT_APP_CLIENT_ID "Publisher"
+
+const MQTT_NAME=""					'<<<<<<<<====== MQTT server login name 
+const MQTT_PASSWORD =""			'<<<<<<<<====== MQTT server login password xxXX1234!
+const OWN_IP="10.10.17.254"				'<<<<<<<<====== This is the IP address of this device
+const PUBLISH_DEMO_GATEWAY="10.10.17.1"	'<<<<<<<<====== Gateway IP address
+const MQTT_SERVER_HOST="10.10.16.10"		'<<<<<<<<====== MQTT server IP
+
+const PAT_GREEN_BLINKING=	"G-~"			'opening TCP link to the server
+const PAT_GREEN_ON=			"G~"			'server connection established
+
+'INCLUDES------------------------------------------------------------
+
+
+
+'DECLARATIONS--------------------------------------------------------
+declare connect_lost as no_yes
+#if PLATFORM_ID=EM500 or PLATFORM_ID=EM500W or PLATFORM_ID=EM1202W
+	#define WLN_RESET_MODE 1 'there will be no dedicated reset, and all other lines are fixed
+#elif PLATFORM_ID=EM1206 or PLATFORM_ID=EM1206W or PLATFORM_ID=DS1101W or PLATFORM_ID=DS1102W or PLATFORM_ID=EM1206N or PLATFORM_ID=DS1101N or PLATFORM_ID=DS1102N
+	#define WLN_CLK PL_IO_NUM_14
+	#define WLN_CS PL_IO_NUM_15
+	#define WLN_DI PL_IO_NUM_12
+	#define WLN_DO PL_IO_NUM_13
+	#define WLN_RST PL_IO_NUM_11
+#else
+	'EM1000, NB1010,...
+	#define WLN_CLK PL_IO_NUM_53
+	#define WLN_CS PL_IO_NUM_49
+	#define WLN_DI PL_IO_NUM_52
+	#define WLN_DO PL_IO_NUM_50
+	#define WLN_RST PL_IO_NUM_51
+#endif
+
+#IF PLATFORM_ID=TPP2WG2 OR PLATFORM_ID=TPP3WG2 OR PLATFORM_ID=TPP2N  OR PLATFORM_ID=TPP2W OR PLATFORM_ID=TPP3W OR PLATFORM_ID=TPP3N
+	#define TBT28_CLK_PIN PL_IO_NUM_15_TX3
+	#define TBT28_DATA_PIN PL_IO_NUM_14_RX3
+	#define TBT30_CLK_PIN PL_IO_NUM_13_TX2
+	#define TBT30_DATA_PIN PL_IO_NUM_12_RX2
+	#define TBT35_CLK_PIN PL_IO_NUM_9_TX0
+	#define TBT35_DATA_PIN PL_IO_NUM_8_RX0
+	#define TBT36_CLK_PIN PL_IO_NUM_11_TX1
+	#define TBT36_DATA_PIN PL_IO_NUM_10_RX1
+#ENDIF
+
+'INCLUDES------------------------------------------------------------
+
+include "sock\trunk\sock.tbh" 'this lib is necessary for the WLN lib's operation
+include "settings\trunk\settings.tbh" 'this lib is necessary to save pre-shared master key
+includepp "settings.xtxt"
+include "wln\trunk\wln.tbh"
+include "mqtt.tbh"
+include "dhcp\trunk\dhcp.tbh"
+'include "mqtt\trunk\mqtt.tbh"
+
+
+include "super_i2c.tbh"
+include "ssi.tbh"
+include "tbt30.tbh"
+include "tbt28.tbh"
+include "tbt35.tbh"
+include "tbt36.tbh"	
+
+
+'DECLARATIONS--------------------------------------------------------
+declare function connect_to_ap(byref ap_name as string, security_mode as pl_wln_security_modes, byref key as string, domain as pl_wln_domains) as en_wln_status_codes
+declare sub detect_module_type()
+declare tcp_sock as byte
+
+const ping_sock = 15	'this is the socket number used for PING command, you should change this according to your own project needs, the range is 0~15
+
+declare function ping(remote_ip as string(15), remote_port as word) as no_yes

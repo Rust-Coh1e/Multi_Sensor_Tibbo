@@ -1,0 +1,237 @@
+include "global.tbh"
+
+dim tcp_sock as byte
+dim cnt as char
+declare sub lcd_draw_matrix()
+declare function ping(emote_ip as string(15), remote_port as word) as no_yes
+'====================================================================
+sub on_sys_init()
+	cnt = 0
+	wln.ip=OWN_IP						'<--- set suitable IP here
+	wln.gatewayip = PUBLISH_DEMO_GATEWAY
+	wln.netmask="255.255.255.0"
+
+	stg_start()
+	
+	
+	if connect_to_ap("Wireless",WLN_SECURITY_MODE_WPA2,"",PL_WLN_DOMAIN_FCC)<>WLN_STATUS_OK then
+		sys.halt
+	end if
+	tcp_sock=sock_get("TCP")
+	sock.num=tcp_sock
+	sock.rxbuffrq(1)
+	sock.txbuffrq(1)
+	sys.buffalloc
+	sock.protocol=PL_SOCK_PROTOCOL_TCP
+	
+	sock.targetinterface=PL_SOCK_INTERFACE_WLN
+	sock.targetip="10.10.16.1"			
+	sock.targetport=1883	
+	
+
+
+	mqtt_start()
+	if mqtt_connect(MQTT_SERVER_HOST,1883,MQTT_NAME,MQTT_PASSWORD,60)=NG then
+		'In here, we cannot make a tcp link to the host ...
+		connect_lost=YES
+	end if
+						
+	
+	
+	lcd.width=320
+	lcd.height=240
+	
+	'RST
+	io.num=PL_IO_NUM_55
+	io.enabled=YES
+
+	'DC
+	io.num=PL_IO_NUM_43
+	io.enabled=YES
+
+	'WR
+	io.num=PL_IO_NUM_42
+	io.enabled=YES
+
+	'RD
+	io.num=PL_IO_NUM_41
+	io.enabled=YES
+
+	'CS
+	io.num=PL_IO_NUM_40
+	io.enabled=YES
+
+	lcd.iomapping="55,43,42,41,40,0" 'RST,DC,WR,RD,CS,data_bus
+	lcd.rotated=YES 'yes, the LCD is installed up side down
+	lcd.enabled=YES
+
+	'backlight ON
+	io.num=PL_IO_NUM_54 
+	io.enabled=YES
+	io.state=LOW
+	lcd_draw_matrix()
+
+	tbt30_init(YES)
+	tbt28_init(NO)
+	tbt35_init(NO)
+	tbt36_init(NO)
+end sub
+
+'--------------------------------------------------------------------
+sub on_sys_timer()
+	wln_proc_timer()
+	
+	'this code will ensure persistent connection to the target IP
+	if wln_check_association()=PL_WLN_ASSOCIATED then
+		sock.num=tcp_sock
+		if sock.statesimple=PL_SSTS_CLOSED then
+			sock.connect
+		end if
+		'sys.debugprint(wln.gatewayip)
+		if connect_lost=YES then
+		'Try to establish the tcp link with mqtt host ...
+		if mqtt_reconnect()=OK then
+			connect_lost=NO
+		end if
+	end if
+	'mqtt_proc_timer()
+	end if
+
+	
+	
+	
+	dim x,y,z as integer
+	dim t,h as float
+	
+	'sys.debugprint(str(tbt28_get())+CR_LF)
+	stor.setdata(str(tbt28_get()),1)
+	'sys.debugprint(ftostr(tbt35_get_kpa(),FTOSTR_MODE_AUTO,5)+" kPa"+CR_LF)
+	stor.setdata(ftostr(tbt35_get_kpa(),FTOSTR_MODE_AUTO,5), 4)
+	if tbt30_get_pc(h,t)=OK then
+		'sys.debugprint(ftostr(h,FTOSTR_MODE_AUTO,5)+"% "+ftostr(t,FTOSTR_MODE_AUTO,5)+" C"+CR_LF)
+		stor.setdata(ftostr(h,FTOSTR_MODE_AUTO,5), 11)
+		stor.setdata(ftostr(t,FTOSTR_MODE_AUTO,5), 17)
+	end if
+	tbt36_get_mg(x,y,z)
+	stor.setdata(stri(x), 24)
+	stor.setdata(stri(y), 28)
+	stor.setdata(stri(z), 32)
+	'sys.debugprint("X="+stri(x)+" Y="+stri(y)+" Z="+stri(z)+CR_LF)
+	
+	
+	
+	
+	if cnt = 5 or cnt = 10 or cnt = 15 then
+	lcd_draw_matrix()
+	romfile.open("11x19(HP).bin")
+	if lcd.setfont(str(romfile.offset))=NG Then
+		sys.debugprint("Error opening font file"+CR_LF)
+	end if
+		lcd.print(stor.getdata(32,3),150,150)
+		lcd.print(str(stor.getdata(1,3)),150,30) 
+		
+		
+		lcd.print(stor.getdata(17,6),150,90)
+		lcd.print(stor.getdata(24,3),150,110)
+		lcd.print(stor.getdata(4,6),150,50)
+		lcd.print(stor.getdata(28,3),150,130)
+		lcd.print(stor.getdata(11,6),150,70)
+
+	if wln_check_association()=PL_WLN_ASSOCIATED then
+		lcd.forecolor=3333
+		lcd.print("Wifi connected",30,170)
+	else
+		lcd.forecolor=32767
+		lcd.print("Wifi disconnected",30,170)
+	end if
+	end if
+	
+	cnt=cnt+1
+	
+	if cnt > 15 then
+		mqtt_publish("WIFI/Light",str(stor.getdata(1,3)),QOS_EXACTLY_ONCE)
+		mqtt_publish("WIFI/Pressure",stor.getdata(4,6),QOS_EXACTLY_ONCE)
+		mqtt_publish("WIFI/Humidity",stor.getdata(11,6),QOS_EXACTLY_ONCE)
+		mqtt_publish("WIFI/Temperature",stor.getdata(17,6),QOS_EXACTLY_ONCE)
+		mqtt_publish("WIFI/Position/X",stor.getdata(24,3),QOS_EXACTLY_ONCE)
+		mqtt_publish("WIFI/Position/Y",stor.getdata(28,3),QOS_EXACTLY_ONCE)
+		mqtt_publish("WIFI/Position/Z",stor.getdata(32,3),QOS_EXACTLY_ONCE)
+		cnt = 0
+	end if
+
+end sub
+
+'--------------------------------------------------------------------
+sub on_sock_data_arrival()
+	wln_proc_data()
+
+	'loopback tcp data
+	if sock.num=tcp_sock then
+		sock.setdata(sock.getdata(sock.txfree))
+		sock.send
+	end if
+	mqtt_proc_data()
+end sub
+
+'--------------------------------------------------------------------
+sub on_wln_task_complete(completed_task as pl_wln_tasks)
+	wln_proc_task_complete(completed_task)
+end sub
+
+'--------------------------------------------------------------------
+sub on_wln_event(wln_event as pl_wln_events)
+	wln_proc_event(wln_event)
+end sub
+
+
+sub lcd_draw_matrix()
+	lcd.forecolor=0
+	lcd.lock
+	
+	lcd.fill(0,0,lcd.width,lcd.height)
+	lcd.forecolor=65535
+	lcd.rectangle(10,10,310,230)
+	romfile.open("11x19(HP).bin")
+	lcd.print("Z  ",30,150)
+	lcd.print("Light:",30,30) 
+		
+		
+	lcd.print("Temperature:", 30,90)
+	lcd.print("X ",30,110)
+	lcd.print("Pressure:",30,50)
+	lcd.print("Y ",30,130)
+	lcd.print("Humidity:" ,30,70)
+	
+	lcd.print("C", 230,90)
+	lcd.print("KPa",230,50)
+	lcd.print("%" ,230,70)
+	lcd.print("Lum",230,30) 
+
+'	romfile.open("11x19(HP).bin")
+'	if lcd.setfont(str(romfile.offset))=NG Then
+'		sys.debugprint("Error opening font file"+CR_LF)
+'	end if
+	'lcd.print("Text",30,29)
+	lcd.unlock
+end sub
+
+
+function ping(remote_ip as string(15), remote_port as word) as no_yes
+	sock.num = ping_sock
+	sock.targetip = remote_ip
+	sock.targetport = remote_port
+	sock.connect
+
+r1:
+	select case sock.state 
+	case PL_SST_CL_DISCARDED_ARPFL
+		ping = no
+		exit function
+	case PL_SST_EST_AOPENED
+		ping = yes
+		sock.close
+		exit function
+	end select
+goto r1
+
+end function
